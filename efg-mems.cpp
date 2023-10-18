@@ -23,6 +23,7 @@ bool asymmetric = false;
 bool use_brindex = true; // if false, then use bdbwt
 string alphabet = "";
 string output_file = "";
+bool fasta = false; // reading queries as fasta
 
 
 void help()
@@ -40,8 +41,9 @@ void help()
 	cout << "           occur in T; only one occurrence T[x..x+d-1] is reported in asymmetric mode" << endl;		
 	cout << "           output is formatted as fasta file with MEMs listed according to the input efg fasta" << endl;		
 	cout << "   -f     file containing alphabet " << endl;
-	cout << "   <queries>  index file of concatenation of queries (with extension .bri)" << endl;
-	cout << "               concatenation format: #AGGATG#AGATGT#, where # is separator symbol" << endl;		
+	cout << "   <queries>  index file of concatenation of queries (with extension .bri), or plain text or fasta if using --bdbwt" << endl;
+	cout << "               index or plain text: concatenation format: #AGGATG#AGATGT#, where # is separator symbol" << endl;
+        cout << "               fasta: alternating header >H and query lines Q; query is converted to #Q#, so MEM coordinates will be +1" << endl;
 	cout << "   <efg>      elastic founder graph in GFA format (with extension .gfa)" << endl;
 	exit(0);
 }
@@ -190,6 +192,124 @@ void read_gfa(ifstream& gfa, string& nodes, string& edges) {
        }
        else
           rextnodes += alphabet[alphabet.size()-1] + node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; //ambiguous right
+    }
+  
+    edges = alphabet[alphabet.size()-1];
+    lextedges = alphabet[alphabet.size()-1];
+    rextedges = alphabet[alphabet.size()-1];
+    for (int i=0; i < edge_labels.size(); i++) {
+       edges += alphabet[alphabet.size()-1]+edge_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // left and right chars not yet known
+       if (i==0) 
+          lextedges += alphabet[alphabet.size()-3] + edge_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // ambiguous left
+       else if (lext[edge_node_start[i]].size()==1) { 
+          for (char lextchar : lext[edge_node_start[i]])
+             lextedges += lextchar + edge_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // unique left
+       }
+       else
+          lextedges += alphabet[alphabet.size()-3] + edge_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // ambiguous left
+       if (rext[edge_node_end[i]].size()==1) {
+          for (char rextchar : rext[edge_node_end[i]])
+             rextedges += alphabet[alphabet.size()-1]  + edge_labels[i] + rextchar + alphabet[alphabet.size()-1]; // unique right
+       }
+       else
+          rextedges += alphabet[alphabet.size()-1] + edge_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; //ambiguous right
+    }
+   // combining left and right chars to nodes and edges
+   nodes[1] = lextnodes[1];
+   nodes[nodes.size()-2] = rextnodes[nodes.size()-2];
+   for (int i=2; i<nodes.size()-2; i++)
+      if (nodes[i+1]==alphabet[alphabet.size()-1]) {
+         nodes[i] = rextnodes[i];
+         nodes[i+2] = lextnodes[i+2];
+      }
+   edges[1] = lextedges[1];
+   edges[edges.size()-2] = rextedges[edges.size()-2];
+   for (int i=2; i<edges.size()-2; i++)
+      if (edges[i+1]==alphabet[alphabet.size()-1]) {
+         edges[i] = rextedges[i];
+         edges[i+2] = lextedges[i+2];
+      }
+}
+
+void read_gfa_generic(ifstream& gfa, string& nodes, string& edges) {
+
+    vector<string> ordered_node_ids;
+    vector<string> ordered_node_labels;
+    std::unordered_map<std::string,int> node_indexes;
+
+
+    vector<string> edge_labels;
+    vector<int> edge_node_start;
+    vector<int> edge_node_end;    
+    unordered_map<int, unordered_set<char>> lext; // chars to the left from nodes 
+    unordered_map<int, unordered_set<char>> rext;  // chars to the right from nodes
+    
+    string lextnodes, rextnodes, lextedges, rextedges;
+    
+    string line;
+    while (getline(gfa, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue; // Skip empty or comment lines
+        }
+
+        vector<string> fields;
+        string field;
+        for (char c : line) {
+            if (c == '\t') {
+                fields.push_back(field);
+                field.clear();
+            } else {
+                field += c;
+            }
+        }
+        fields.push_back(field);
+
+        if (fields[0] == "S") {
+	    ordered_node_ids.push_back(fields[1]);
+            ordered_node_labels.push_back(fields[2]);
+	    node_indexes.insert({ fields[1], ordered_node_ids.size() - 1 });
+        } else if (fields[0] == "L") {
+            assert(node_indexes.find(fields[1]) != node_indexes.end()); // maybe use at operator?
+            int start_node_id = node_indexes[fields[1]];
+            bool start_node_orientation = (fields[2] == "-");
+            assert(node_indexes.find(fields[3]) != node_indexes.end()); // maybe use at operator?
+            int end_node_id = node_indexes[fields[3]];
+            bool end_node_orientation = (fields[4] == "-");
+            lext[end_node_id].insert(ordered_node_labels[start_node_id][ordered_node_labels[start_node_id].size()-1]);
+            rext[start_node_id].insert(ordered_node_labels[end_node_id][0]);            
+            string start_node_label = ordered_node_labels[start_node_id];
+            if (start_node_orientation) {
+                start_node_label = start_node_label + "_rev";
+            }
+            string end_node_label = ordered_node_labels[end_node_id];
+            if (end_node_orientation) {
+                end_node_label = end_node_label + "_rev";
+            }
+            edge_labels.push_back(start_node_label + ">" +end_node_label);
+            edge_node_start.push_back(start_node_id);
+            edge_node_end.push_back(end_node_id);
+        }
+    }
+
+    nodes = alphabet[alphabet.size()-1];
+    lextnodes = alphabet[alphabet.size()-1];
+    rextnodes = alphabet[alphabet.size()-1];
+    for (int i=0; i < ordered_node_labels.size(); i++) {
+       nodes += alphabet[alphabet.size()-1]+ordered_node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // left and right chars not yet known
+       if (i==0) 
+          lextnodes += alphabet[alphabet.size()-3] + ordered_node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // ambiguous left
+       else if (lext[i].size()==1) { 
+          for (char lextchar : lext[i])
+             lextnodes += lextchar + ordered_node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // unique left
+       }
+       else
+          lextnodes += alphabet[alphabet.size()-3] + ordered_node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; // ambiguous left
+       if (rext[i].size()==1) {
+          for (char rextchar : rext[i])
+             rextnodes += alphabet[alphabet.size()-1]  + ordered_node_labels[i] + rextchar + alphabet[alphabet.size()-1]; // unique right
+       }
+       else
+          rextnodes += alphabet[alphabet.size()-1] + ordered_node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; //ambiguous right
     }
   
     edges = alphabet[alphabet.size()-1];
@@ -424,7 +544,8 @@ ulint explore_mems(T tidx, T qidx, T fidx, ofstream& output, bool f = false, sds
     ulint d = 0;
     dS.push(d); 
     bool MEM;
-    ulint maxMEM = 0;    
+    ulint maxMEM = 0;   
+    ulint nodeCount = 0; 
     
     TS fsample;
     if (f) // using fidx as filter
@@ -435,6 +556,7 @@ ulint explore_mems(T tidx, T qidx, T fidx, ofstream& output, bool f = false, sds
        fS.push(fsample);
     
     while (!S.empty()) {
+       nodeCount++;
        node = S.top();
        S.pop();
        d = dS.top();
@@ -483,6 +605,7 @@ ulint explore_mems(T tidx, T qidx, T fidx, ofstream& output, bool f = false, sds
           else if (!f or fsample.is_invalid()) // MEM string not found in filter index, so not a dublicate
              reportAMEMs<T,TS>(tidx,qidx,sample,qsample,d,output);   
     }
+    cout << "Number of recursion tree nodes visited: " << nodeCount << endl;
     return maxMEM;
 }
 
@@ -538,7 +661,7 @@ ulint report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
       report = false;
       while (!qidx.left_extension(edges[i],qsample).is_invalid() && edges[i-1]!=alphabet[alphabet.size()-1]) {
          qsample = qidx.left_extension(edges[i],qsample);
-         if (d_edge[i]==1) // found a node boundary
+         if (d_edge[i-1]==1) // found a node boundary
             report = true;
          i--;  
          d++;
@@ -615,7 +738,8 @@ void find_mems(string filename_qidx, string filename_efg)
        // third last char marks ambiguous left- and right-extension, not used in MEM exploration, but used in cross-product
     }
     ifstream efg_in(filename_efg);
-    read_gfa(efg_in,nodes,edges);
+    //read_gfa(efg_in,nodes,edges);
+    read_gfa_generic(efg_in,nodes,edges);
     efg_in.close();
          
     string nodes_without_gt(nodes);    
@@ -735,15 +859,26 @@ void find_mems(string filename_qidx, string filename_efg)
     //edges_without_gt.clear();
     
     T qidx;
+    std::stack<T> qindexes; // queries in fasta
     if (use_brindex)
        qidx.load_from_file(filename_qidx);      
     else {
        // With bdbwt, creating indexes on the fly
        ifstream qidx_in(filename_qidx);
        string queries;
-       getline(qidx_in,queries); // assuming input is one line
+       getline(qidx_in,queries); // by default assuming input is one line
+       //cout << queries << endl;
+       if (queries[0]=='>') {// fasta
+          fasta = true;
+          while (getline(qidx_in,queries)) {
+             //cout << queries << endl;
+             if (queries.size()>1 and queries[0]!='>')
+                qindexes.push(T("#"+queries+"#"));
+          }
+       }   
+       else
+          qidx = T(queries);
        qidx_in.close(); 
-       qidx = T(queries);
     }
        
     
@@ -759,33 +894,43 @@ void find_mems(string filename_qidx, string filename_efg)
     cout << "Exploring MEMs " << endl;
 
     ulint maxMEM;
-    output << ">node " << kappa << "-MEMs" << endl;
-    maxMEM = explore_mems<T,TS>(nidx,qidx,nidx,output,false);
-    cout << "Maximum node " << kappa << "-MEM is of length " << maxMEM << endl;
-    output << ">edge " << kappa << "-MEMs" << endl;
-    if (!asymmetric)
-       maxMEM = explore_mems<T,TS>(eidx,qidx,nidx,output,false,d_edge_bwt,rmq_edge,sa_edge);    
-    else  // using node index as filter 
-       maxMEM = explore_mems<T,TS>(eidx,qidx,nidx,output,true,d_edge_bwt,rmq_edge,sa_edge);    
-    cout << "Maximum edge " << kappa << "-MEM is of length " << maxMEM << endl;
+    
+    if (!fasta) // queries as concatenation
+       qindexes.push(qidx);
+    
+    while (!qindexes.empty()) {
+       qidx = qindexes.top();
+       qindexes.pop();
+
+       output << ">node " << kappa << "-MEMs" << endl;
+       maxMEM = explore_mems<T,TS>(nidx,qidx,nidx,output,false);
+       cout << "Maximum node " << kappa << "-MEM is of length " << maxMEM << endl;
+
+       output << ">edge " << kappa << "-MEMs" << endl;
+       if (!asymmetric)
+          maxMEM = explore_mems<T,TS>(eidx,qidx,nidx,output,false,d_edge_bwt,rmq_edge,sa_edge);    
+       else  // using node index as filter 
+          maxMEM = explore_mems<T,TS>(eidx,qidx,nidx,output,true,d_edge_bwt,rmq_edge,sa_edge);    
+       cout << "Maximum edge " << kappa << "-MEM is of length " << maxMEM << endl;
            
+
+       // full nodes MEMs are include in edge prefix and suffix MEMs
+       //output << ">full node MEMs" << endl;
+       //maxMEM = report_full_node_mems<T,TS>(nodes_without_gt,qidx,output);
+       //cout << "Maximum full node MEM is of length " << maxMEM << endl;
+    
+
+       output << ">edge suffix MEMs" << endl;
+       maxMEM = report_suffix_mems<T,TS>(edges_without_gt,d_edge,qidx,output);
+       cout << "Maximum edge suffix MEM is of length " << maxMEM << endl;
+    
+       output << ">edge prefix MEMs" << endl;
+       maxMEM = report_prefix_mems<T,TS>(edges_without_gt,d_edge,qidx,output);
+       cout << "Maximum edge prefix MEM is of length " << maxMEM << endl;
+    }
+    output.close();
     d_edge_bwt.empty();
     delete[] sa_edge;
-
-    output << ">full node MEMs" << endl;
-    maxMEM = report_full_node_mems<T,TS>(nodes_without_gt,qidx,output);
-    cout << "Maximum full node MEM is of length " << maxMEM << endl;
-    
-
-    output << ">edge suffix MEMs" << endl;
-    maxMEM = report_suffix_mems<T,TS>(edges_without_gt,d_edge,qidx,output);
-    cout << "Maximum edge suffix MEM is of length " << maxMEM << endl;
-    
-    output << ">edge prefix MEMs" << endl;
-    maxMEM = report_prefix_mems<T,TS>(edges_without_gt,d_edge,qidx,output);
-    cout << "Maximum edge prefix MEM is of length " << maxMEM << endl;
-
-    output.close();
 
     auto tend = high_resolution_clock::now();
     ulint tot_time = duration_cast<microseconds>(tend-tstart).count(); 
