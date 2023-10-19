@@ -19,7 +19,7 @@ git clone https://github.com/algbio/efg-mems
 cd efg-mems
 cmake .
 make
-.\efg-mems
+./efg-mems
 ```
 The last command gives instructions how to use it.
 You can try out the example files and shell scripts:
