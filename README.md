@@ -19,8 +19,16 @@ git clone https://github.com/algbio/efg-mems
 cd efg-mems
 cmake .
 make
-unzip input.zip
 .\efg-mems
 ```
 The last command gives instructions how to use it.
-You can try out the unzipped example files.
+You can try out the example files and shell scripts:
+```
+cd ..
+wget www.cs.helsinki.fi/u/vmakinen/ef-mems/covid19-ecoli-efg.zip
+unzip covid19-ecoli-efg.zip
+cd inputs
+./find-mems-covid19.sh
+./find-mems-covid19-2.sh
+./find-mems-ecoli.sh
+```
