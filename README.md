@@ -22,13 +22,15 @@ make
 ./efg-mems
 ```
 The last command gives instructions how to use it.
-You can try out the example files and shell scripts:
+You can try out the example files and shell scripts below as instructed below.
+For these to work you need to install br-index.
 ```
 cd ..
 wget www.cs.helsinki.fi/group/gsa/ef-mems/covid19-ecoli-efg.zip
 unzip covid19-ecoli-efg.zip
 cd inputs
-./find-mems-covid19.sh
-./find-mems-covid19-2.sh
+./index-covid19.sh
+./find-mems-covid19-text.sh
+./find-mems-covid19-efg.sh
 ./find-mems-ecoli.sh
 ```
