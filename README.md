@@ -30,7 +30,20 @@ wget www.cs.helsinki.fi/group/gsa/ef-mems/covid19-ecoli-efg.zip
 unzip covid19-ecoli-efg.zip
 cd inputs
 ./index-covid19.sh
-./find-mems-covid19-text.sh
 ./find-mems-covid19-efg.sh
 ./find-mems-ecoli.sh
+```
+To compare the results to MEM finding on br-index, you can continue as follows:
+```
+cd ..
+git clone --recursive https://github.com/algbio/br-index-mems.git
+cd br-index-mems
+mkdir build
+cd build
+cmake ..
+make
+cd ..
+cd ..
+cd inputs
+./find-mems-covid19-text.sh
 ```
