@@ -3,7 +3,7 @@
   */
 
 #include "../br-index/src/definitions.hpp"
-#include "../BD_BWT_index/include/BD_BWT_index.hh"
+#include "../bdbwt/include/BD_BWT_index.hh" 
 
 namespace bri {
 
