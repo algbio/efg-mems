@@ -191,7 +191,7 @@ void read_gfa(ifstream& gfa, string& nodes, string& edges) {
              rextnodes += alphabet[alphabet.size()-1]  + node_labels[i] + rextchar + alphabet[alphabet.size()-1]; // unique right
        }
        else
-          rextnodes += alphabet[alphabet.size()-1] + node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; //ambiguous right
+          rextnodes += alphabet[alphabet.size()-1] + node_labels[i] + alphabet[alphabet.size()-3] + alphabet[alphabet.size()-1]; //ambiguous right
     }
   
     edges = alphabet[alphabet.size()-1];
@@ -212,7 +212,7 @@ void read_gfa(ifstream& gfa, string& nodes, string& edges) {
              rextedges += alphabet[alphabet.size()-1]  + edge_labels[i] + rextchar + alphabet[alphabet.size()-1]; // unique right
        }
        else
-          rextedges += alphabet[alphabet.size()-1] + edge_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; //ambiguous right
+          rextedges += alphabet[alphabet.size()-1] + edge_labels[i] + alphabet[alphabet.size()-3] + alphabet[alphabet.size()-1]; //ambiguous right
     }
    // combining left and right chars to nodes and edges
    nodes[1] = lextnodes[1];
