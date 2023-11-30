@@ -26,7 +26,7 @@ You can try out the example files and shell scripts below as instructed below.
 For these to work you need to install br-index (check a closed issue for tips).
 ```
 cd ..
-wget www.cs.helsinki.fi/group/gsa/ef-mems/covid19-ecoli-efg.zip
+wget www.cs.helsinki.fi/group/gsa/efg-mems/covid19-ecoli-efg.zip
 unzip covid19-ecoli-efg.zip
 cd inputs
 ./index-covid19.sh
