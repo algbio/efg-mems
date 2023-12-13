@@ -231,11 +231,14 @@ void read_gfa(ifstream& gfa, string& nodes, string& edges) {
       }
 }
 
-void read_gfa_generic(ifstream& gfa, string& nodes, string& edges) {
+void read_efg_generic(ifstream& gfa, string& nodes, string& edges) {
 
     vector<string> ordered_node_ids;
     vector<string> ordered_node_labels;
     std::unordered_map<std::string,int> node_indexes;
+    vector<bool> is_source;
+    vector<bool> is_sink;
+    vector<pair<int,int>> ordered_edges;
 
 
     vector<string> edge_labels;
@@ -265,30 +268,39 @@ void read_gfa_generic(ifstream& gfa, string& nodes, string& edges) {
         fields.push_back(field);
 
         if (fields[0] == "S") {
-	    ordered_node_ids.push_back(fields[1]);
+            ordered_node_ids.push_back(fields[1]);
             ordered_node_labels.push_back(fields[2]);
+            is_source.push_back(true);
+	    is_sink.push_back(true);
 	    node_indexes.insert({ fields[1], ordered_node_ids.size() - 1 });
         } else if (fields[0] == "L") {
             assert(node_indexes.find(fields[1]) != node_indexes.end()); // maybe use at operator?
             int start_node_id = node_indexes[fields[1]];
-            bool start_node_orientation = (fields[2] == "-");
             assert(node_indexes.find(fields[3]) != node_indexes.end()); // maybe use at operator?
             int end_node_id = node_indexes[fields[3]];
-            bool end_node_orientation = (fields[4] == "-");
             lext[end_node_id].insert(ordered_node_labels[start_node_id][ordered_node_labels[start_node_id].size()-1]);
             rext[start_node_id].insert(ordered_node_labels[end_node_id][0]);            
+	    ordered_edges.push_back(pair<int,int>(start_node_id, end_node_id));
+	    is_source[end_node_id] = false;
+	    is_sink[start_node_id] = false;
+        }
+    }
+
+    for (int i = 0; i < ordered_node_labels.size(); i++) {
+	    if (is_source[i])
+		    ordered_node_labels[i] = alphabet[alphabet.size()-3] + ordered_node_labels[i];
+	    if (is_sink[i])
+		    ordered_node_labels[i] = ordered_node_labels[i] + alphabet[alphabet.size()-3];
+    }
+
+    for (int i = 0; i < ordered_edges.size(); i++) {
+            int start_node_id = get<0>(ordered_edges[i]);
             string start_node_label = ordered_node_labels[start_node_id];
-            if (start_node_orientation) {
-                start_node_label = start_node_label + "_rev";
-            }
+            int end_node_id = get<1>(ordered_edges[i]);
             string end_node_label = ordered_node_labels[end_node_id];
-            if (end_node_orientation) {
-                end_node_label = end_node_label + "_rev";
-            }
             edge_labels.push_back(start_node_label + ">" +end_node_label);
             edge_node_start.push_back(start_node_id);
             edge_node_end.push_back(end_node_id);
-        }
     }
 
     nodes = alphabet[alphabet.size()-1];
@@ -309,7 +321,7 @@ void read_gfa_generic(ifstream& gfa, string& nodes, string& edges) {
              rextnodes += alphabet[alphabet.size()-1]  + ordered_node_labels[i] + rextchar + alphabet[alphabet.size()-1]; // unique right
        }
        else
-          rextnodes += alphabet[alphabet.size()-1] + ordered_node_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; //ambiguous right
+          rextnodes += alphabet[alphabet.size()-1] + ordered_node_labels[i] + alphabet[alphabet.size()-3] + alphabet[alphabet.size()-1]; //ambiguous right
     }
   
     edges = alphabet[alphabet.size()-1];
@@ -330,7 +342,7 @@ void read_gfa_generic(ifstream& gfa, string& nodes, string& edges) {
              rextedges += alphabet[alphabet.size()-1]  + edge_labels[i] + rextchar + alphabet[alphabet.size()-1]; // unique right
        }
        else
-          rextedges += alphabet[alphabet.size()-1] + edge_labels[i] + alphabet[alphabet.size()-1] + alphabet[alphabet.size()-1]; //ambiguous right
+          rextedges += alphabet[alphabet.size()-1] + edge_labels[i] + alphabet[alphabet.size()-3] + alphabet[alphabet.size()-1]; //ambiguous right
     }
    // combining left and right chars to nodes and edges
    nodes[1] = lextnodes[1];
@@ -348,7 +360,6 @@ void read_gfa_generic(ifstream& gfa, string& nodes, string& edges) {
          edges[i+2] = lextedges[i+2];
       }
 }
-
 
 template <class T, class TS>
 bool is_right_maximal(T idx, TS sample) 
@@ -653,30 +664,46 @@ ulint report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
    ulint d;
    bool report;
    ulint maxMEM = 0;
-   TS qsample;
+   TS qsample,q2sample;
    std::vector<ulint> locations;
    while (i>1) {
       qsample = qidx.get_initial_sample(true);
       d = 0;
       report = false;
-      while (!qidx.left_extension(edges[i],qsample).is_invalid() && edges[i-1]!=alphabet[alphabet.size()-1]) {
+      while (edges[i-1]!=alphabet[alphabet.size()-1]) {
          qsample = qidx.left_extension(edges[i],qsample);
+         if (qsample.is_invalid())
+            break;
          if (d_edge[i-1]==1) // found a node boundary
             report = true;
-         i--;  
+         i--; 
          d++;
+         if (report) {
+            if (d>maxMEM)
+              maxMEM = d;             
+            q2sample = qidx.left_extension(edges[i],qsample);
+            if (q2sample.is_invalid()) { // no valid extensions, reporting the whole interval and stopping
+               locations = qidx.locate_sample(qsample);
+               for (ulint jj=0; jj < locations.size(); jj++)
+                     output << i+1 << "," << locations[jj] << "," << d << endl;            
+               break;
+            }  
+            // Valid extension exist, reporting the rest
+            for (ulint j=0; j<alphabet.size()-1; j++)
+               if (alphabet[j]!=edges[i]) {
+                  q2sample = qidx.left_extension(alphabet[j],qsample);
+                  if (q2sample.is_invalid())
+                     continue;                 
+                  locations = qidx.locate_sample(q2sample);
+                  for (ulint jj=0; jj < locations.size(); jj++)
+                     output << i+1 << "," << locations[jj]+1 << "," << d << endl;
+               }              
+         } 
       }
-      if (report) {
-         locations = qidx.locate_sample(qsample);
-         for (ulint j=0; j < locations.size(); j++)
-            output << i+1 << "," << locations[j] << "," << d << endl; 
-        if (d>maxMEM)
-           maxMEM = d;
-      }  
       // scanning to next edge
       while (edges[i]!=alphabet[alphabet.size()-1])
          i--;
-      if (i>1)    
+      if (i>1)   
          i = i-2; // bypassing right-char
    }
    return maxMEM;
@@ -689,26 +716,44 @@ ulint report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
    ulint d;
    bool report;
    ulint maxMEM = 0;
-   TS qsample;
+   TS qsample,q2sample;
    std::vector<ulint> locations;
    while (i<edges.size()) {
       qsample = qidx.get_initial_sample(true);
       d = 0;
       report = false;
-      while (!qidx.right_extension(edges[i],qsample).is_invalid() && edges[i+1]!=alphabet[alphabet.size()-1]) {
+      while (edges[i+1]!=alphabet[alphabet.size()-1]) {
          qsample = qidx.right_extension(edges[i],qsample);
+         if (qsample.is_invalid())
+            break;
          if (d_edge[i]==1) // found a node boundary
             report = true;
-         i++;  
+         i++; 
          d++;
+         if (report) {
+            if (d>maxMEM)
+               maxMEM = d;
+            q2sample = qidx.right_extension(edges[i],qsample);
+            if (q2sample.is_invalid()) { // no valid extensions, reporting the whole interval and stopping
+               locations = qidx.locate_sample(qsample);
+               for (ulint jj=0; jj < locations.size(); jj++)
+                     //output << i-d-1 << "," << locations[jj] << "," << d << endl;            
+                     output << i-d << "," << locations[jj] << "," << d << endl;            
+               break;
+            }  
+            // Valid extension exist, reporting the rest
+            for (ulint j=0; j<alphabet.size()-1; j++)
+               if (alphabet[j]!=edges[i]) {
+                  q2sample = qidx.right_extension(alphabet[j],qsample);
+                  if (q2sample.is_invalid())
+                     continue;                 
+                  locations = qidx.locate_sample(q2sample);
+                  for (ulint jj=0; jj < locations.size(); jj++)
+                     //output << i-d-1 << "," << locations[jj] << "," << d << endl;
+                     output << i-d << "," << locations[jj] << "," << d << endl;
+               }              
+         } 
       }
-      if (report) {
-         locations = qidx.locate_sample(qsample);
-         for (ulint j=0; j < locations.size(); j++)
-             output << i-d << "," << locations[j] << "," << d << endl; 
-         if (d>maxMEM)
-            maxMEM = d; 
-      }  
       // scanning to next edge
       while (edges[i]!=alphabet[alphabet.size()-1])
          i++;
@@ -739,7 +784,7 @@ void find_mems(string filename_qidx, string filename_efg)
     }
     ifstream efg_in(filename_efg);
     //read_gfa(efg_in,nodes,edges);
-    read_gfa_generic(efg_in,nodes,edges);
+    read_efg_generic(efg_in,nodes,edges);
     efg_in.close();
          
     string nodes_without_gt(nodes);    
