@@ -1,7 +1,7 @@
 # efg-mems
 MEM finding on (elastic founder) graphs
 
-# installation
+## installation
 
 This tool requires sdsl-lite, br-index, and BDBWT.
 Latter two should be installed in the parent directory of efg-mems.
@@ -47,3 +47,8 @@ cd ..
 cd inputs
 ./find-mems-covid19-text.sh
 ```
+
+## TODO
+ - parse input queries with the correct FASTA header info
+ - finalize linear MEMS file format
+ - output both formats (GAF/MEMS) in one execution

@@ -84,6 +84,11 @@ public:
     {
        return bdbwt.backward_step(j);
     }
+
+    ulint FL(ulint j)
+    {
+       return bdbwt.forward_step(j);
+    }
     
       
     /*
@@ -160,6 +165,11 @@ public:
 
     uchar get_terminator() {
         return bdbwt.END;
+    }
+
+    ulint get_terminator_position(bool reversed = false)
+    {
+	    return FL(0);
     }
     
     std::vector<ulint> locate_sample(bd_sample const& sample)
