@@ -17,6 +17,8 @@ using namespace bri;
 using namespace std;
 using namespace sdsl;
 
+//#define EFG_MEMS_DEBUG
+
 // Global variables assigned with optional parameters
 ulint kappa = 1; // MEM threshold
 bool asymmetric = false;
@@ -35,14 +37,10 @@ struct starting_positions {
 	select_support_mcl<> edges_ss;
 };
 
-struct xgfa_info {
+struct gfa_info {
 	vector<string> ordered_node_ids;
 	vector<int> node_lengths;
 	vector<pair<int,int>> ordered_edges;
-	std::vector<size_t> seg_start_cols; // line X of xGFA
-	std::vector<size_t> block_heights; // line B of xGFA
-	bit_vector block_leaders;
-	rank_support_v5<> block_leaders_rs;
 };
 
 struct query_info {
@@ -61,7 +59,6 @@ void help()
 	cout << "Usage: efg-mems [options] <queries> <efg>" << endl;
         cout << "   --asymmetric  use asymmetric definition for MEMs " << endl;
 	cout << "   --bdbwt       use bdbwt instead of default br-index " << endl;
-	cout << "   --map-to-msa  map matches back to the MSA (output in mem format) " << endl;
 	cout << "   -k      MEM threshold" << endl;
 	cout << "   -a      alphabet string with last three symbols regarded special, default ACGTN#0" << endl;	
 	cout << "   -o      output file where lines x,i,d are outputed for MEMs Q[i..i+d-1]=T[x..x+d-1]; " << endl;
@@ -101,7 +98,7 @@ bool parse_args(char** argv, int argc, int &ptr){
     {
 
 		if(ptr>=argc-1){
-			cout << "Error: missing parameter after -k option." << endl;
+			cerr << "Error: missing parameter after -k option." << endl;
 			help();
 		}
 
@@ -113,7 +110,7 @@ bool parse_args(char** argv, int argc, int &ptr){
     {
 
 		if(ptr>=argc-1){
-			cout << "Error: missing parameter after -a option." << endl;
+			cerr << "Error: missing parameter after -a option." << endl;
 			help();
 		}
         alphabet = string(argv[ptr]);
@@ -123,7 +120,7 @@ bool parse_args(char** argv, int argc, int &ptr){
     {
 
 		if(ptr>=argc-1){
-			cout << "Error: missing parameter after -o option." << endl;
+			cerr << "Error: missing parameter after -o option." << endl;
 			help();
 		}
         output_file = string(argv[ptr]);  
@@ -133,7 +130,7 @@ bool parse_args(char** argv, int argc, int &ptr){
     {
 
 		if(ptr>=argc-1){
-			cout << "Error: missing parameter after -f option." << endl;
+			cerr << "Error: missing parameter after -f option." << endl;
 			help();
 		}
         string alphabet_file="";
@@ -264,7 +261,7 @@ void read_gfa(ifstream& gfa, string& nodes, string& edges) {
       }
 }
 
-void read_efg_generic(ifstream& gfa, string& nodes, string& edges, starting_positions& sp, xgfa_info &efginfo, query_info &qinfo) {
+void read_gfa_generic(ifstream& gfa, string& nodes, string& edges, starting_positions& sp, gfa_info &efginfo, query_info &qinfo) {
 
     vector<string> ordered_node_ids;
     vector<string> ordered_node_labels;
@@ -307,6 +304,7 @@ void read_efg_generic(ifstream& gfa, string& nodes, string& edges, starting_posi
 	    is_sink.push_back(true);
 	    node_indexes.insert({ fields[1], ordered_node_ids.size() - 1 });
         } else if (fields[0] == "L") {
+            //TODO: remove assumption that GFA file is ordered or warn the user
             assert(node_indexes.find(fields[1]) != node_indexes.end()); // maybe use at operator?
             int start_node_id = node_indexes[fields[1]];
             assert(node_indexes.find(fields[3]) != node_indexes.end()); // maybe use at operator?
@@ -316,25 +314,8 @@ void read_efg_generic(ifstream& gfa, string& nodes, string& edges, starting_posi
 	    ordered_edges.push_back(pair<int,int>(start_node_id, end_node_id));
 	    is_source[end_node_id] = false;
 	    is_sink[start_node_id] = false;
-        } else if (fields[0] == "X") {
-            for (int i = 1; i < fields.size(); i++) {
-                efginfo.seg_start_cols.push_back(std::stoi(fields[i]));
-	    }
-	} else if (fields[0] == "B") {
-            for (int i = 1; i < fields.size(); i++) {
-                efginfo.block_heights.push_back(std::stoi(fields[i]));
-	    }
         }
     }
-
-    efginfo.block_leaders = sdsl::bit_vector(ordered_node_ids.size(), 0);
-    // leaders[i-1] == 1 iff the i-1-th node is the first of its block
-    efginfo.block_leaders[0] = 1;
-    for (int i = 0, c = 0; i < efginfo.block_heights.size() - 1; i++) {
-	    c += efginfo.block_heights[i];
-	    efginfo.block_leaders[c] = 1;
-    }
-    efginfo.block_leaders_rs = sdsl::rank_support_v5<>(&efginfo.block_leaders);
 
     efginfo.node_lengths.resize(ordered_node_labels.size());
     for (int i = 0; i < ordered_node_labels.size(); i++) {
@@ -463,7 +444,7 @@ void read_efg_generic(ifstream& gfa, string& nodes, string& edges, starting_posi
    std::swap(ordered_edges, efginfo.ordered_edges);
 }
 
-void output_node_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo)
+void output_node_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
 	ulint node = sp.nodes_rs(ti + 1) - 1;
 	ulint nodeindex = ti - sp.nodes_ss(node+1);
@@ -484,7 +465,7 @@ void output_node_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, sta
 	output << nodeindex + length << "\t";                   // end position on the path
 	output << 0 << "\t" << 0 << "\t" << 255 << std::endl; // FIXME
 }
-void output_edge_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo)
+void output_edge_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
 	ulint edge = sp.edges_rs(ti + 1) - 1;
 	ulint source = efginfo.ordered_edges[edge].first;
@@ -509,45 +490,6 @@ void output_edge_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, sta
 	output << edgeindex + length << "\t";                   // end position on the path
 	output << 0 << "\t" << 0 << "\t" << 255 << std::endl; // FIXME
 }
-void output_node_MEM_msa(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo)
-{
-	ulint node = sp.nodes_rs(ti + 1) - 1;
-	ulint block = efginfo.block_leaders_rs(node + 1) - 1;
-	ulint startcol = efginfo.seg_start_cols[block];
-	ulint nodeindex = ti - sp.nodes_ss(node+1);
-	ulint msaindex = startcol + nodeindex;
-	ulint query = qinfo.concat_rs(qi + 1) - 1;
-	ulint queryindex = qi - qinfo.concat_ss(query + 1);
-
-	// MSA output
-	// 0-indexed to 1-indexed
-	//msaindex += 1;
-	queryindex += 1;
-	output << qinfo.ordered_query_ids[query] << "," << queryindex << "," << msaindex << "," << length << std::endl;
-}
-void output_edge_MEM_msa(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo)
-{
-	ulint edge = sp.edges_rs(ti + 1) - 1;
-	ulint source = efginfo.ordered_edges[edge].first;
-	ulint target = efginfo.ordered_edges[edge].second;
-	ulint slength = efginfo.node_lengths[source];
-	ulint tlength = efginfo.node_lengths[target];
-	ulint edgeindex = ti - sp.edges_ss(edge+1);
-	ulint query = qinfo.concat_rs(qi + 1) - 1;
-	ulint queryindex = qi - qinfo.concat_ss(query + 1);
-
-	ulint block = efginfo.block_leaders_rs(source + 1) - 1;
-	ulint startcol = efginfo.seg_start_cols[block];
-	ulint msaindex = startcol + edgeindex;
-
-	// MSA output
-	// 0-indexed to 1-indexed
-	//msaindex += 1;
-	queryindex += 1;
-	output << qinfo.ordered_query_ids[query] << "," << queryindex << "," << msaindex << "," << length << std::endl;
-}
-
-
 
 template <class T, class TS>
 bool is_right_maximal(T idx, TS sample) 
@@ -572,8 +514,9 @@ bool is_left_maximal(T idx, TS sample)
 }
 
 template<class T, class TS>
-void reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* saidx = NULL)
+ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* saidx = NULL)
 { 
+   ulint MEMcount = 0;
    // a bit naive implementation of the cross product 
    // additive factor alphabet.size()^2(t_biBWTstep+\alphabet.size()^2) slower than an optimal implementation
    std::vector<ulint>** a= new  std::vector<ulint>*[alphabet.size()];
@@ -625,13 +568,10 @@ void reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output,
                            b[ii][jj] = idx.locate_sample(Sb[ii][jj]);
                      if (d_bwt.size()==0) // no distance constraint, outputing all              
                         for (ulint iii=0; iii<a[i][j].size(); iii++)  
-                           for (ulint jjj=0; jjj<b[ii][jj].size(); jjj++)                        
-                              //output << b[ii][jj][jjj]+1 << "," << a[i][j][iii]+1 << "," << d << endl;                           
-			      // node MEMs
-			      if (!msa_output)
+                           for (ulint jjj=0; jjj<b[ii][jj].size(); jjj++) {
+                              MEMcount += 1;
                               output_node_MEM_gaf(b[ii][jj][jjj]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
-			      else
-                              output_node_MEM_msa(b[ii][jj][jjj]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+                           }
                      else { // outputing recursively using the distance constraint
                         pair<ulint,ulint> interval, leftinterval, rightinterval;
                         std::stack<pair<ulint,ulint>> intervalS;
@@ -645,12 +585,9 @@ void reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output,
                            argmin = rmq(interval.first,interval.second);
                            if (d_bwt[argmin]<=d+1)
                               for (ulint iii=0; iii<a[i][j].size(); iii++) {
-                                 //output << saidx[argmin]+1 << "," << a[i][j][iii]+1 << "," << d << endl;
-				      if (!msa_output)
-					      output_edge_MEM_gaf(saidx[argmin]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
-				      else
-					      output_edge_MEM_msa(saidx[argmin]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
-			      }
+                                 MEMcount += 1;
+                                 output_edge_MEM_gaf(saidx[argmin]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+                              }
 
                            leftinterval.first = interval.first;
                            leftinterval.second = argmin-1;
@@ -679,11 +616,14 @@ void reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output,
    delete[] Sb;    
    delete[] Ia;
    delete[] Ib;    
+
+   return MEMcount;
 }
 
 template<class T, class TS>
-void reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& output)
+ulint reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
+   ulint MEMcount = 0;
    std::vector<ulint>** a= new  std::vector<ulint>*[alphabet.size()];
    bool** b= new  bool*[alphabet.size()];
    TS** Sa= new  TS*[alphabet.size()];
@@ -722,9 +662,11 @@ void reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& output
             a[i][j] = qidx.locate_sample(Sa[i][j]);
             if (locations.size()==0)
                locations = idx.locate_sample(sample);
-            for (ulint iii=0; iii<a[i][j].size(); iii++) 
+            for (ulint iii=0; iii<a[i][j].size(); iii++) {
                // reporting one occurrence in the text
-               output << locations[0] << "," << a[i][j][iii]+1 << "," << d << endl;          
+               MEMcount += 1;
+               output_edge_MEM_gaf(locations[0], a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+            }
          }
    for (ulint i=0; i<alphabet.size()-1; i++) {
       delete[] a[i];
@@ -737,10 +679,12 @@ void reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& output
    delete[] b;    
    delete[] Sa;
    delete[] Ia;
+
+   return MEMcount;
 }
 
 template<class T, class TS>
-ulint explore_mems(T tidx, T qidx, T fidx, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo, bool f = false, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* sa = NULL)
+pair<ulint,ulint> explore_mems(T tidx, T qidx, T fidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo, bool f = false, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* sa = NULL)
 {
     TS sample(tidx.get_initial_sample(true));
     TS qsample(qidx.get_initial_sample(true));
@@ -754,8 +698,9 @@ ulint explore_mems(T tidx, T qidx, T fidx, ofstream& output, starting_positions 
     ulint d = 0;
     dS.push(d); 
     bool MEM;
-    ulint maxMEM = 0;   
-    ulint nodeCount = 0; 
+    ulint maxMEM = 0;
+    ulint MEMcount = 0;
+    ulint nodeCount = 0;
     
     TS fsample;
     if (f) // using fidx as filter
@@ -807,26 +752,39 @@ ulint explore_mems(T tidx, T qidx, T fidx, ofstream& output, starting_positions 
           if (sample.size()+qsample.size()==node.first.size()+node.second.size()) 
              MEM = 0;
        }
-       if (d > maxMEM)
-          maxMEM = d;
-       if (MEM and d>=kappa and output.is_open())
-          if (!asymmetric)
-             reportMEMs<T,TS>(tidx,qidx,sample,qsample,d,output,sp,efginfo,qinfo,d_bwt,rmq,sa);
-          else if (!f or fsample.is_invalid()) // MEM string not found in filter index, so not a dublicate
-             reportAMEMs<T,TS>(tidx,qidx,sample,qsample,d,output);   
+       if (MEM and d>=kappa and output.is_open()) {
+#ifdef EFG_MEMS_DEBUG
+       cerr << "calling reportMEMs with depth equal to " << d;
+       cerr << " on string ";
+       for (ulint n = 0, i = qidx.FL(qsample.range.first); n < d; n++, i = qidx.FL(i)) {
+          cerr << qidx.bwt_at(i);
+       }
+       cerr << std::endl;
+#endif
+          ulint mems;
+	  if (!asymmetric) {
+             mems = reportMEMs<T,TS>(tidx,qidx,sample,qsample,d,output,sp,efginfo,qinfo,d_bwt,rmq,sa);
+          } else if (!f or fsample.is_invalid()) { // MEM string not found in filter index, so not a dublicate
+             mems = reportAMEMs<T,TS>(tidx,qidx,sample,qsample,d,output,sp,efginfo,qinfo);
+          }
+
+          MEMcount += mems;
+          if (mems > 0 && d > maxMEM)
+                  maxMEM = d;
+       }
     }
-    cout << "Number of recursion tree nodes visited: " << nodeCount << endl;
-    return maxMEM;
+    cerr << "Number of recursion tree nodes visited: " << nodeCount << endl;
+    return pair<ulint,ulint>(maxMEM,MEMcount);
 }
 
 
 template<class T, class TS>
-ulint report_full_node_mems(string nodes, T qidx, ofstream& output)
+pair<ulint,ulint> report_full_node_mems(string nodes, T qidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
    ulint i = nodes.size()-3;
    ulint d;
    bool report;
-   ulint maxMEM = 0;
+   ulint maxMEM = 0, MEMcount = 0;
    TS qsample;
    std::vector<ulint> locations;
    while (i>1) {
@@ -841,8 +799,10 @@ ulint report_full_node_mems(string nodes, T qidx, ofstream& output)
       if (d>1 and nodes[i-1]==alphabet[alphabet.size()-1]) { // TODO fix special case d=1
          // full node match
          locations = qidx.locate_sample(qsample);
+         MEMcount += locations.size();
          for (ulint j=0; j < locations.size(); j++)
-            output << i+1 << "," << locations[j] << "," << d << endl; 
+            //output << i+1 << "," << locations[j] << "," << d << endl; 
+            output_node_MEM_gaf(i+1, locations[j], d, output, sp, efginfo, qinfo);
          if (locations.size()>0 and d>maxMEM)
             maxMEM = d;  
       }
@@ -852,17 +812,17 @@ ulint report_full_node_mems(string nodes, T qidx, ofstream& output)
       if (i>1)    
          i = i-2; // bypassing right-char
    }
-   return maxMEM;
+   return pair<ulint,ulint>(maxMEM,MEMcount);
 }
 
 
 template<class T, class TS>
-ulint report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo)
+pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
    ulint i = edges.size()-3;
    ulint d;
    bool report;
-   ulint maxMEM = 0;
+   ulint maxMEM = 0, MEMcount = 0;
    TS qsample,q2sample;
    std::vector<ulint> locations;
    while (i>1) {
@@ -883,12 +843,10 @@ ulint report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
             q2sample = qidx.left_extension(edges[i],qsample);
             if (q2sample.is_invalid()) { // no valid extensions, reporting the whole interval and stopping
                locations = qidx.locate_sample(qsample);
+               MEMcount += locations.size();
                for (ulint jj=0; jj < locations.size(); jj++)
                      //output << i+1 << "," << locations[jj] << "," << d << endl;            
-		       if (!msa_output)
-			       output_edge_MEM_gaf(i+1, locations[jj], d, output, sp, efginfo, qinfo);
-		       else
-			       output_edge_MEM_msa(i+1, locations[jj], d, output, sp, efginfo, qinfo);
+                     output_edge_MEM_gaf(i+1, locations[jj], d, output, sp, efginfo, qinfo);
                break;
             }  
             // Valid extension exist, reporting the rest
@@ -898,12 +856,10 @@ ulint report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
                   if (q2sample.is_invalid())
                      continue;                 
                   locations = qidx.locate_sample(q2sample);
+                  MEMcount += locations.size();
                   for (ulint jj=0; jj < locations.size(); jj++)
                      //output << i+1 << "," << locations[jj]+1 << "," << d << endl;
-			  if (!msa_output)
-				  output_edge_MEM_gaf(i+1, locations[jj]+1, d, output, sp, efginfo, qinfo);
-			  else
-				  output_edge_MEM_msa(i+1, locations[jj]+1, d, output, sp, efginfo, qinfo);
+                     output_edge_MEM_gaf(i+1, locations[jj]+1, d, output, sp, efginfo, qinfo);
                }              
          } 
       }
@@ -913,16 +869,16 @@ ulint report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
       if (i>1)   
          i = i-2; // bypassing right-char
    }
-   return maxMEM;
+   return pair<ulint,ulint>(maxMEM,MEMcount);
 }
 
 template<class T, class TS>
-ulint report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstream& output, starting_positions &sp, xgfa_info &efginfo, query_info &qinfo)
+pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
    ulint i = 2;
    ulint d;
    bool report;
-   ulint maxMEM = 0;
+   ulint maxMEM = 0, MEMcount = 0;
    TS qsample,q2sample;
    std::vector<ulint> locations;
    while (i<edges.size()) {
@@ -943,13 +899,11 @@ ulint report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
             q2sample = qidx.right_extension(edges[i],qsample);
             if (q2sample.is_invalid()) { // no valid extensions, reporting the whole interval and stopping
                locations = qidx.locate_sample(qsample);
+               MEMcount += locations.size();
                for (ulint jj=0; jj < locations.size(); jj++) {
                      //output << i-d << "," << locations[jj] << "," << d << endl;            
-		       if (!msa_output)
-			       output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
-		       else
-			       output_edge_MEM_msa(i-d, locations[jj], d, output, sp, efginfo, qinfo);
-	       }
+                     output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
+               }
                break;
             }  
             // Valid extension exist, reporting the rest
@@ -959,13 +913,11 @@ ulint report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
                   if (q2sample.is_invalid())
                      continue;                 
                   locations = qidx.locate_sample(q2sample);
+                  MEMcount += locations.size();
                   for (ulint jj=0; jj < locations.size(); jj++) {
                      //output << i-d << "," << locations[jj] << "," << d << endl;
-			  if (!msa_output)
-				  output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
-			  else
-				  output_edge_MEM_msa(i-d, locations[jj], d, output, sp, efginfo, qinfo);
-		  }
+                     output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
+                  }
                }              
          } 
       }
@@ -974,7 +926,7 @@ ulint report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstre
          i++;
       i = i+2; // bypassing left-char
    }
-   return maxMEM;
+   return pair<ulint,ulint>(maxMEM,MEMcount);
 }
 
 template<class T>
@@ -983,13 +935,15 @@ void initialize_query_info(T &qidx, query_info &qinfo)
 	// find length of string
 	range_t fullrange = qidx.full_range();
 	ulint length = fullrange.second - fullrange.first; // terminator char included
-	//cout << "length is " << length << endl;
 
+#ifdef EFG_MEMS_DEBUG
 	// iterate over string
-	/*for (ulint i = qidx.FL(qidx.get_terminator_position()); i != qidx.get_terminator_position(); i = qidx.FL(i)) {
-		cout << qidx.bwt_at(i);
+	cerr << "length of query index is " << length << " and query is \"" << endl;
+	for (ulint i = qidx.FL(qidx.get_terminator_position()); i != qidx.get_terminator_position(); i = qidx.FL(i)) {
+		cerr << qidx.bwt_at(i);
 	}
-	cout << endl;*/
+	cerr << "\"" << endl;
+#endif
 
 	qinfo.concat.resize(length - 1);
 	// TODO: assert
@@ -1010,11 +964,13 @@ void initialize_query_info(T &qidx, query_info &qinfo)
 	}
 	qinfo.ordered_query_lengths.push_back(qlength);
 
-	/*cout << "query lengths are ";
+#ifdef EFG_MEMS_DEBUG
+	cerr << "query lengths are ";
 	for (auto l : qinfo.ordered_query_lengths) {
-		cout << l << " ";
+		cerr << l << " ";
 	}
-	cout << endl;*/
+	cerr << endl;
+#endif
 
 	qinfo.concat_rs = sdsl::rank_support_v5<>(&qinfo.concat);
 	qinfo.concat_ss = sdsl::select_support_mcl<>(&qinfo.concat);
@@ -1034,12 +990,12 @@ void find_mems(string filename_qidx, string filename_efg)
     using std::chrono::milliseconds;
     using std::chrono::microseconds;
 
-    cout << "Creating and loading indexes" << endl;
+    cerr << "Creating and loading indexes" << endl;
     auto tstart = high_resolution_clock::now();
     
     string nodes, edges;
     starting_positions sp;
-    xgfa_info efginfo;
+    gfa_info efginfo;
     query_info qinfo;
 
     if (alphabet.size()==0) {
@@ -1049,23 +1005,13 @@ void find_mems(string filename_qidx, string filename_efg)
        // third last char marks ambiguous left- and right-extension, not used in MEM exploration, but used in cross-product
     }
     ifstream efg_in(filename_efg);
-    //read_gfa(efg_in,nodes,edges);
-    read_efg_generic(efg_in,nodes,edges,sp,efginfo,qinfo);
+    read_gfa_generic(efg_in,nodes,edges,sp,efginfo,qinfo);
     efg_in.close();
          
     string nodes_without_gt(nodes);    
     nodes_without_gt.erase(std::remove(nodes_without_gt.begin(), nodes_without_gt.end(), '>'), nodes_without_gt.end());
     string edges_without_gt(edges);    
     edges_without_gt.erase(std::remove(edges_without_gt.begin(), edges_without_gt.end(), '>'), edges_without_gt.end());
-
-    /*cout << nodes_without_gt << endl;
-    for (ulint i=0; i < sp.nodes.size(); i++)
-	    cout << sp.nodes[i];
-    cout << endl;
-    cout << edges_without_gt << endl;
-    for (ulint i=0; i < sp.edges.size(); i++)
-	    cout << sp.edges[i];
-    cout << endl;*/
 
     sp.nodes_rs = rank_support_v5<>(&sp.nodes);
     sp.edges_rs = rank_support_v5<>(&sp.edges);
@@ -1138,6 +1084,25 @@ void find_mems(string filename_qidx, string filename_efg)
     p_out << paths_without_gt;
     p_out.close();
     */
+
+#ifdef EFG_MEMS_DEBUG
+    cerr << "Node index is " << endl;
+    cerr << nodes_without_gt << endl;
+
+    cerr << "Node starting positions in the index are " << endl;
+    for (ulint i=0; i < sp.nodes.size(); i++)
+	    cerr << sp.nodes[i];
+    cerr << endl;
+
+    cerr << "Edge index is " << endl;
+    cerr << edges_without_gt << endl;
+
+    cerr << "Edge starting positions in the index are " << endl;
+    for (ulint i=0; i < sp.edges.size(); i++)
+	    cerr << sp.edges[i];
+    cerr << endl;
+#endif
+
     
     // Building and saving indexes if they don't exist
     T nidx;
@@ -1216,12 +1181,12 @@ void find_mems(string filename_qidx, string filename_efg)
     if (output_file.size()!=0) {     
        output.open(output_file);
        if (!output) {
-          cout << "Could not open output file " << output_file << endl;
+          cerr << "Could not open output file " << output_file << endl;
        }
     }
 
     auto tmem = high_resolution_clock::now();       
-    cout << "Exploring MEMs " << endl;
+    cerr << "Exploring MEMs " << endl;
 
     ulint maxMEM;
     
@@ -1232,31 +1197,40 @@ void find_mems(string filename_qidx, string filename_efg)
        qidx = qindexes.top();
        qindexes.pop();
 
-       output << ">node " << kappa << "-MEMs" << endl;
-       maxMEM = explore_mems<T,TS>(nidx,qidx,nidx,output,sp,efginfo,qinfo,false);
-       cout << "Maximum node " << kappa << "-MEM is of length " << maxMEM << endl;
+       pair<ulint,ulint> result = explore_mems<T,TS>(nidx,qidx,nidx,output,sp,efginfo,qinfo,false);
+       maxMEM = result.first;
+       ulint nodeMEMs = result.second;
+       cerr << "Found " << nodeMEMs << " node " << kappa << "-MEM of length at most " << maxMEM << endl;
 
-       output << ">edge " << kappa << "-MEMs" << endl;
-       if (!asymmetric)
-          maxMEM = explore_mems<T,TS>(eidx,qidx,nidx,output,sp,efginfo,qinfo,false,d_edge_bwt,rmq_edge,sa_edge);    
-       else  // using node index as filter 
-          maxMEM = explore_mems<T,TS>(eidx,qidx,nidx,output,sp,efginfo,qinfo,true,d_edge_bwt,rmq_edge,sa_edge);    
-       cout << "Maximum edge " << kappa << "-MEM is of length " << maxMEM << endl;
-           
+       ulint edgeMEMs;
+       if (!asymmetric) {
+          result = explore_mems<T,TS>(eidx,qidx,nidx,output,sp,efginfo,qinfo,false,d_edge_bwt,rmq_edge,sa_edge);
+       } else { // using node index as filter
+          result = explore_mems<T,TS>(eidx,qidx,nidx,output,sp,efginfo,qinfo,true,d_edge_bwt,rmq_edge,sa_edge);
+       }
+       maxMEM = result.first;
+       edgeMEMs = result.second;
+       cerr << "Found " << edgeMEMs << " edge " << kappa << "-MEM of length at most " << maxMEM << endl;
+
 
        // full nodes MEMs are include in edge prefix and suffix MEMs
        //output << ">full node MEMs" << endl;
-       //maxMEM = report_full_node_mems<T,TS>(nodes_without_gt,qidx,output);
+       //result = report_full_node_mems<T,TS>(nodes_without_gt,qidx,output,sp,efginfo,qinfo);
+       //maxMEM = result.first;
+       //ulint fullnodeMEMs = result.second;
        //cout << "Maximum full node MEM is of length " << maxMEM << endl;
+       //cerr << "Found " << edgeMEMs << " full node MEMs of length at most " << maxMEM << endl;
     
 
-       output << ">edge suffix MEMs" << endl;
-       maxMEM = report_suffix_mems<T,TS>(edges_without_gt,d_edge,qidx,output,sp,efginfo,qinfo);
-       cout << "Maximum edge suffix MEM is of length " << maxMEM << endl;
+       result = report_suffix_mems<T,TS>(edges_without_gt,d_edge,qidx,output,sp,efginfo,qinfo);
+       maxMEM = result.first;
+       ulint edgesufMEMs = result.second;
+       cerr << "Found " << edgesufMEMs << " edge suffix MEMs of length at most " << maxMEM << endl;
     
-       output << ">edge prefix MEMs" << endl;
-       maxMEM = report_prefix_mems<T,TS>(edges_without_gt,d_edge,qidx,output,sp,efginfo,qinfo);
-       cout << "Maximum edge prefix MEM is of length " << maxMEM << endl;
+       result = report_prefix_mems<T,TS>(edges_without_gt,d_edge,qidx,output,sp,efginfo,qinfo);
+       maxMEM = result.first;
+       ulint edgepreMEMs = result.second;
+       cerr << "Found " << edgepreMEMs << " edge prefix MEMs of length at most " << maxMEM << endl;
     }
     output.close();
     d_edge_bwt.empty();
@@ -1265,8 +1239,8 @@ void find_mems(string filename_qidx, string filename_efg)
     auto tend = high_resolution_clock::now();
     ulint tot_time = duration_cast<microseconds>(tend-tstart).count(); 
     ulint mem_time = duration_cast<microseconds>(tend-tmem).count(); 
-    cout << "MEM exploration time     : " << mem_time << " microseconds" << endl;
-    cout << "Total time     : " << tot_time << " microseconds" << endl;
+    cerr << "MEM exploration time     : " << mem_time << " microseconds" << endl;
+    cerr << "Total time     : " << tot_time << " microseconds" << endl;
 }
 
 
