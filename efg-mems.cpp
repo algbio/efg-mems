@@ -261,7 +261,7 @@ void read_gfa(ifstream& gfa, string& nodes, string& edges) {
       }
 }
 
-void read_gfa_generic(ifstream& gfa, string& nodes, string& edges, starting_positions& sp, gfa_info &efginfo, query_info &qinfo) {
+void read_gfa_generic(ifstream& gfa, string& nodes, string& edges, starting_positions& sp, gfa_info &efginfo) {
 
     vector<string> ordered_node_ids;
     vector<string> ordered_node_labels;
@@ -570,7 +570,8 @@ ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output
                         for (ulint iii=0; iii<a[i][j].size(); iii++)  
                            for (ulint jjj=0; jjj<b[ii][jj].size(); jjj++) {
                               MEMcount += 1;
-                              output_node_MEM_gaf(b[ii][jj][jjj]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+                              if (output.is_open())
+                                 output_node_MEM_gaf(b[ii][jj][jjj]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
                            }
                      else { // outputing recursively using the distance constraint
                         pair<ulint,ulint> interval, leftinterval, rightinterval;
@@ -586,7 +587,8 @@ ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output
                            if (d_bwt[argmin]<=d+1)
                               for (ulint iii=0; iii<a[i][j].size(); iii++) {
                                  MEMcount += 1;
-                                 output_edge_MEM_gaf(saidx[argmin]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+				 if (output.is_open())
+                                    output_edge_MEM_gaf(saidx[argmin]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
                               }
 
                            leftinterval.first = interval.first;
@@ -665,7 +667,8 @@ ulint reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& outpu
             for (ulint iii=0; iii<a[i][j].size(); iii++) {
                // reporting one occurrence in the text
                MEMcount += 1;
-               output_edge_MEM_gaf(locations[0], a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+	       if (output.is_open())
+                  output_edge_MEM_gaf(locations[0], a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
             }
          }
    for (ulint i=0; i<alphabet.size()-1; i++) {
@@ -752,7 +755,7 @@ pair<ulint,ulint> explore_mems(T tidx, T qidx, T fidx, ofstream& output, startin
           if (sample.size()+qsample.size()==node.first.size()+node.second.size()) 
              MEM = 0;
        }
-       if (MEM and d>=kappa and output.is_open()) {
+       if (MEM and d>=kappa) {
 #ifdef EFG_MEMS_DEBUG
        cerr << "calling reportMEMs with depth equal to " << d;
        cerr << " on string ";
@@ -802,7 +805,8 @@ pair<ulint,ulint> report_full_node_mems(string nodes, T qidx, ofstream& output, 
          MEMcount += locations.size();
          for (ulint j=0; j < locations.size(); j++)
             //output << i+1 << "," << locations[j] << "," << d << endl; 
-            output_node_MEM_gaf(i+1, locations[j], d, output, sp, efginfo, qinfo);
+	    if (output.is_open())
+               output_node_MEM_gaf(i+1, locations[j], d, output, sp, efginfo, qinfo);
          if (locations.size()>0 and d>maxMEM)
             maxMEM = d;  
       }
@@ -846,7 +850,8 @@ pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T 
                MEMcount += locations.size();
                for (ulint jj=0; jj < locations.size(); jj++)
                      //output << i+1 << "," << locations[jj] << "," << d << endl;            
-                     output_edge_MEM_gaf(i+1, locations[jj], d, output, sp, efginfo, qinfo);
+		     if (output.is_open())
+                        output_edge_MEM_gaf(i+1, locations[jj], d, output, sp, efginfo, qinfo);
                break;
             }  
             // Valid extension exist, reporting the rest
@@ -859,7 +864,8 @@ pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T 
                   MEMcount += locations.size();
                   for (ulint jj=0; jj < locations.size(); jj++)
                      //output << i+1 << "," << locations[jj]+1 << "," << d << endl;
-                     output_edge_MEM_gaf(i+1, locations[jj]+1, d, output, sp, efginfo, qinfo);
+		     if (output.is_open())
+                        output_edge_MEM_gaf(i+1, locations[jj]+1, d, output, sp, efginfo, qinfo);
                }              
          } 
       }
@@ -902,7 +908,8 @@ pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T 
                MEMcount += locations.size();
                for (ulint jj=0; jj < locations.size(); jj++) {
                      //output << i-d << "," << locations[jj] << "," << d << endl;            
-                     output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
+		     if (output.is_open())
+                        output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
                }
                break;
             }  
@@ -916,7 +923,8 @@ pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T 
                   MEMcount += locations.size();
                   for (ulint jj=0; jj < locations.size(); jj++) {
                      //output << i-d << "," << locations[jj] << "," << d << endl;
-                     output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
+		     if (output.is_open())
+                        output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
                   }
                }              
          } 
@@ -982,35 +990,16 @@ void initialize_query_info(T &qidx, query_info &qinfo)
 }
 
 template<class T, class TS>
-void find_mems(string filename_qidx, string filename_efg)
+void prepare_efg(string const &filename_efg, string &nodes_without_gt, string &edges_without_gt, T &nidx, T &eidx, sdsl::int_vector<> &d_edge, sdsl::int_vector<> &d_edge_bwt, sdsl::rmq_succinct_sada<> &rmq_edge, ulint *&sa_edge, starting_positions &sp, gfa_info &efginfo)
 {
-    using std::chrono::high_resolution_clock;
-    using std::chrono::duration_cast;
-    using std::chrono::duration;
-    using std::chrono::milliseconds;
-    using std::chrono::microseconds;
-
-    cerr << "Creating and loading indexes" << endl;
-    auto tstart = high_resolution_clock::now();
-    
     string nodes, edges;
-    starting_positions sp;
-    gfa_info efginfo;
-    query_info qinfo;
-
-    if (alphabet.size()==0) {
-       alphabet = "ACGTN#$";
-       // last char is a separator in graph concatenation, omitted in all algorithms
-       // second last char is separator in queries, not used in MEM exploration, but used in cross-product
-       // third last char marks ambiguous left- and right-extension, not used in MEM exploration, but used in cross-product
-    }
     ifstream efg_in(filename_efg);
-    read_gfa_generic(efg_in,nodes,edges,sp,efginfo,qinfo);
+    read_gfa_generic(efg_in,nodes,edges,sp,efginfo);
     efg_in.close();
-         
-    string nodes_without_gt(nodes);    
+
+    nodes_without_gt = string(nodes);    
     nodes_without_gt.erase(std::remove(nodes_without_gt.begin(), nodes_without_gt.end(), '>'), nodes_without_gt.end());
-    string edges_without_gt(edges);    
+    edges_without_gt = string(edges);    
     edges_without_gt.erase(std::remove(edges_without_gt.begin(), edges_without_gt.end(), '>'), edges_without_gt.end());
 
     sp.nodes_rs = rank_support_v5<>(&sp.nodes);
@@ -1051,7 +1040,6 @@ void find_mems(string filename_qidx, string filename_efg)
           suffix = false;
           prefix = true;
        }
-    sdsl::int_vector<> d_edge; // distance from pos in start node to the start of end node
     d_edge.resize(edges_without_gt.size()+1);        
     j = 0;
     for (ulint i=edges_without_gt.size()-1; i!=0; i--) {
@@ -1103,11 +1091,8 @@ void find_mems(string filename_qidx, string filename_efg)
     cerr << endl;
 #endif
 
-    
-    // Building and saving indexes if they don't exist
-    T nidx;
-    T eidx;
 
+    // Building and saving indexes if they don't exist
     if (use_brindex) {
        ifstream nidx_in(filename_efg+".nodes.bri");
        if (nidx_in.is_open()) {
@@ -1135,9 +1120,8 @@ void find_mems(string filename_qidx, string filename_efg)
     
     /* Converting d_edge to BWT order */
     // Computing suffix array also
-    sdsl::int_vector<> d_edge_bwt;
     d_edge_bwt.resize(edges_without_gt.size()+1);    
-    ulint* sa_edge = new ulint[edges_without_gt.size()+1];
+    sa_edge = new ulint[edges_without_gt.size()+1];
     // assuming endmarker has lex-order 0
     j = eidx.LF(0);
     for (ulint i=0; i<edges_without_gt.size(); i++) {
@@ -1147,14 +1131,16 @@ void find_mems(string filename_qidx, string filename_efg)
     } 
     //d_edge.empty();
     
-    sdsl::rmq_succinct_sada<> rmq_edge(&d_edge_bwt);
+    rmq_edge = sdsl::rmq_succinct_sada<>(&d_edge_bwt);
         
     // releasing memory
     //nodes_without_gt.clear();
     //edges_without_gt.clear();
-    
-    T qidx;
-    std::stack<T> qindexes; // queries in fasta
+}
+
+template<class T, class TS>
+void prepare_query(string filename_qidx, T &qidx, std::stack<T> &qindexes, query_info &qinfo)
+{
     if (use_brindex)
        qidx.load_from_file(filename_qidx);      
     else {
@@ -1176,7 +1162,43 @@ void find_mems(string filename_qidx, string filename_efg)
        qidx_in.close(); 
     }
     initialize_query_info(qidx, qinfo);
-    
+}
+
+template<class T, class TS>
+void find_mems(string filename_qidx, string filename_efg)
+{
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+    using std::chrono::microseconds;
+
+    cerr << "Creating and loading indexes" << endl;
+    auto tstart = high_resolution_clock::now();
+
+
+    if (alphabet.size()==0) {
+       alphabet = "ACGTN#$";
+       // last char is a separator in graph concatenation, omitted in all algorithms
+       // second last char is separator in queries, not used in MEM exploration, but used in cross-product
+       // third last char marks ambiguous left- and right-extension, not used in MEM exploration, but used in cross-product
+    }
+
+    starting_positions sp;
+    gfa_info efginfo;
+    string nodes_without_gt, edges_without_gt;    
+    T nidx, eidx;
+    sdsl::int_vector<> d_edge; // distance from pos in start node to the start of end node
+    sdsl::int_vector<> d_edge_bwt;
+    ulint *sa_edge;
+    sdsl::rmq_succinct_sada<> rmq_edge;
+    prepare_efg<T,TS>(filename_efg, nodes_without_gt, edges_without_gt, nidx, eidx, d_edge, d_edge_bwt, rmq_edge, sa_edge, sp, efginfo);
+
+    query_info qinfo;
+    T qidx;
+    std::stack<T> qindexes; // queries in fasta
+    prepare_query<T,TS>(filename_qidx, qidx, qindexes, qinfo);
+
     ofstream output;
     if (output_file.size()!=0) {     
        output.open(output_file);
