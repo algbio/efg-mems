@@ -27,6 +27,7 @@ string alphabet = "";
 string output_file = "";
 bool fasta = false; // reading queries as fasta
 bool msa_output = false; // map MEMs back to the MSA, instead of the graph
+bool batch_queries = true; // if false, MEMs for each query separately
 
 struct starting_positions {
 	bit_vector nodes;
@@ -54,24 +55,28 @@ struct query_info {
 
 void help()
 {
-	cout << "efg-mems: locate all MEMs between queries and elastic founder graph" << endl;
+        //      "80 characters end here -------------------------------------------------------->"
+        cout << "efg-mems: locate all MEMs between some queries and en Elastic Founder Graph" << endl;
 
-	cout << "Usage: efg-mems [options] <queries> <efg>" << endl;
-        cout << "   --asymmetric  use asymmetric definition for MEMs " << endl;
-	cout << "   --bdbwt       use bdbwt instead of default br-index " << endl;
-	cout << "   -k      MEM threshold" << endl;
-	cout << "   -a      alphabet string with last three symbols regarded special, default ACGTN#0" << endl;	
-	cout << "   -o      output file where lines x,i,d are outputed for MEMs Q[i..i+d-1]=T[x..x+d-1]; " << endl;
-    cout << "           in symmetric mode (default) the matches are locally maximal, i.e., Q[i-1]!=T[x-1] and Q[i+d]!=T[x+d] " << endl;
-	cout << "           in asymmetric mode the matches are globally maximal, i.e., Q[i..i+d] or Q[i-1..i+d-1] do not " << endl;
-	cout << "           occur in T; only one occurrence T[x..x+d-1] is reported in asymmetric mode" << endl;		
-	cout << "           output is formatted as fasta file with MEMs listed according to the input efg fasta" << endl;		
-	cout << "   -f     file containing alphabet " << endl;
-	cout << "   <queries>  index file of concatenation of queries (with extension .bri), or plain text or fasta if using --bdbwt" << endl;
-	cout << "               index or plain text: concatenation format: #AGGATG#AGATGT#, where # is separator symbol" << endl;
-        cout << "               fasta: alternating header >H and query lines Q; query is converted to #Q#, so MEM coordinates will be +1" << endl;
-	cout << "   <efg>      elastic founder graph in GFA format (with extension .gfa)" << endl;
-	exit(0);
+        cout << endl;
+        cout << "In symmetric mode (default), the MEMs Q[i..i+d-1] = T[x..x+d-1] are locally" << endl;
+        cout << "maximal, that is, Q[i-1]!=T[x-1] and Q[i+d]!=T[x+d]. In asymmetric mode, the " << endl;
+        cout << "matches are globally maximal, that is, Q[i..i+d] or Q[i-1..i+d-1] do not occur" << endl;
+        cout << "in T; only one occurrence T[x..x+d-1] is reported in asymmetric mode" << endl;
+        cout << endl;
+
+        cout << "Usage: efg-mems [options] <queries> <efg>" << endl;
+        cout << "   --asymmetric  use asymmetric definition for MEMs" << endl;
+        cout << "   --bdbwt       use bdbwt instead of default br-index" << endl;
+        cout << "   --indexing    do not batch queries and search for MEMs one query at a time" << endl;
+        cout << "   -k THRESH     compute only MEMs of length at least THRESH (default=1)" << endl;
+        cout << "   -a ALPHA      alphabet string ALPHA with its last three symbols regarded as" << endl;
+        cout << "                   special (default=ACGTN#0)" << endl;
+        cout << "   -o OUTFILE    output file in GAF format" << endl;
+        cout << "   -f ALPHAFILE  file containing the alphabet" << endl;
+        cout << "   <queries>     FASTA file containing the queries" << endl;
+        cout << "   <efg>         Elastic Founder Graph in xGFA format" << endl;
+        exit(0);
 }
 
 bool parse_args(char** argv, int argc, int &ptr){
@@ -92,6 +97,12 @@ bool parse_args(char** argv, int argc, int &ptr){
     {
 
         use_brindex = false;
+
+    }
+    else if (s.compare("--indexing") == 0)
+    {
+
+        batch_queries = false;
 
     }    
     else if (s.compare("-k") == 0) 
@@ -444,12 +455,18 @@ void read_gfa_generic(ifstream& gfa, string& nodes, string& edges, starting_posi
    std::swap(ordered_edges, efginfo.ordered_edges);
 }
 
-void output_node_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
+void output_node_MEM_gaf(ulint ti, ulint qi, ulint length, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
 	ulint node = sp.nodes_rs(ti + 1) - 1;
 	ulint nodeindex = ti - sp.nodes_ss(node+1);
-	ulint query = qinfo.concat_rs(qi + 1) - 1;
-	ulint queryindex = qi - qinfo.concat_ss(query + 1);
+	ulint query, queryindex;
+        if (batch_queries) {
+                query = qinfo.concat_rs(qi + 1) - 1;
+                queryindex = qi - qinfo.concat_ss(query + 1);
+        } else {
+                query = q;
+                queryindex = qi - 1;
+        }
 
 	// GAF format
 	output <<
@@ -465,7 +482,7 @@ void output_node_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, sta
 	output << nodeindex + length << "\t";                   // end position on the path
 	output << 0 << "\t" << 0 << "\t" << 255 << std::endl; // FIXME
 }
-void output_edge_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
+void output_edge_MEM_gaf(ulint ti, ulint qi, ulint length, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
 	ulint edge = sp.edges_rs(ti + 1) - 1;
 	ulint source = efginfo.ordered_edges[edge].first;
@@ -473,8 +490,14 @@ void output_edge_MEM_gaf(ulint ti, ulint qi, ulint length, ofstream& output, sta
 	ulint slength = efginfo.node_lengths[source];
 	ulint tlength = efginfo.node_lengths[target];
 	ulint edgeindex = ti - sp.edges_ss(edge+1);
-	ulint query = qinfo.concat_rs(qi + 1) - 1;
-	ulint queryindex = qi - qinfo.concat_ss(query + 1);
+	ulint query, queryindex;
+        if (batch_queries) {
+                query = qinfo.concat_rs(qi + 1) - 1;
+                queryindex = qi - qinfo.concat_ss(query + 1);
+        } else {
+                query = q;
+                queryindex = qi - 1;
+        }
 
 	// GAF format
 	output <<
@@ -501,9 +524,19 @@ bool is_right_maximal(T idx, TS sample)
    else
       return 1;
 }
-    
-template <class T, class TS>    
-bool is_left_maximal(T idx, TS sample) 
+template <class T, class TS>
+bool is_right_maximal(T *idx, TS sample)
+{
+   uchar c = idx->bwt_at(sample.rangeR.first,true);
+   TS right = idx->right_extension(c,sample);
+   if (sample.size() == right.size())
+      return 0;
+   else
+      return 1;
+}
+
+template <class T, class TS>
+bool is_left_maximal(T idx, TS sample)
 {
    uchar c = idx.bwt_at(sample.rangeR.first,false);
    TS left = idx.left_extension(c,sample);
@@ -512,9 +545,19 @@ bool is_left_maximal(T idx, TS sample)
    else
       return 1;
 }
+template <class T, class TS>
+bool is_left_maximal(T *idx, TS sample)
+{
+   uchar c = idx->bwt_at(sample.rangeR.first,false);
+   TS left = idx->left_extension(c,sample);
+   if (sample.size() == left.size())
+      return 0;
+   else
+      return 1;
+}
 
 template<class T, class TS>
-ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* saidx = NULL)
+ulint reportMEMs(T idx, T *qidx, TS sample, TS qsample, ulint d, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* saidx = NULL)
 { 
    ulint MEMcount = 0;
    // a bit naive implementation of the cross product 
@@ -536,9 +579,9 @@ ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output
       Ib[i] = new bool[alphabet.size()];      
       for (ulint j=0; j<alphabet.size()-1; j++) {
          Ia[i][j] = false;
-         right = qidx.right_extension(alphabet[j],qsample);
+         right = qidx->right_extension(alphabet[j],qsample);
          if (!right.is_invalid()) {
-            left = qidx.left_extension(alphabet[i],right);         
+            left = qidx->left_extension(alphabet[i],right);
             if (!left.is_invalid()) {
                Sa[i][j] = left;
                Ia[i][j] = true;
@@ -562,7 +605,7 @@ ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output
                for (ulint jj=0; jj<alphabet.size()-1; jj++)
                   if (i!=ii and j!=jj and Ib[ii][jj]) {
                      if (a[i][j].size()==0)  // locate charged on the output
-                        a[i][j] = qidx.locate_sample(Sa[i][j]);
+                        a[i][j] = qidx->locate_sample(Sa[i][j]);
                      if (b[ii][jj].size()==0)  // locate charged on the output
                         if (saidx==NULL) // no suffix array, using slower locate
                            b[ii][jj] = idx.locate_sample(Sb[ii][jj]);
@@ -571,7 +614,7 @@ ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output
                            for (ulint jjj=0; jjj<b[ii][jj].size(); jjj++) {
                               MEMcount += 1;
                               if (output.is_open())
-                                 output_node_MEM_gaf(b[ii][jj][jjj]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+                                 output_node_MEM_gaf(b[ii][jj][jjj]+1, a[i][j][iii]+1, d, q, output, sp, efginfo, qinfo);
                            }
                      else { // outputing recursively using the distance constraint
                         pair<ulint,ulint> interval, leftinterval, rightinterval;
@@ -588,7 +631,7 @@ ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output
                               for (ulint iii=0; iii<a[i][j].size(); iii++) {
                                  MEMcount += 1;
 				 if (output.is_open())
-                                    output_edge_MEM_gaf(saidx[argmin]+1, a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+                                    output_edge_MEM_gaf(saidx[argmin]+1, a[i][j][iii]+1, d, q, output, sp, efginfo, qinfo);
                               }
 
                            leftinterval.first = interval.first;
@@ -623,7 +666,7 @@ ulint reportMEMs(T idx, T qidx, TS sample, TS qsample, ulint d, ofstream& output
 }
 
 template<class T, class TS>
-ulint reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
+ulint reportAMEMs(T idx, T *qidx, TS qsample, TS sample, ulint d, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
    ulint MEMcount = 0;
    std::vector<ulint>** a= new  std::vector<ulint>*[alphabet.size()];
@@ -640,9 +683,9 @@ ulint reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& outpu
       Ia[i] = new bool[alphabet.size()];
       for (ulint j=0; j<alphabet.size()-1; j++) {
          Ia[i][j] = false;
-         right = qidx.right_extension(alphabet[j],qsample);
+         right = qidx->right_extension(alphabet[j],qsample);
          if (!right.is_invalid()) {
-            left = qidx.left_extension(alphabet[i],right);
+            left = qidx->left_extension(alphabet[i],right);
             if (!left.is_invalid()) {
                Sa[i][j] = left;
                Ia[i][j] = true;
@@ -661,14 +704,14 @@ ulint reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& outpu
    for (ulint i=0; i<alphabet.size()-1; i++) 
       for (ulint j=0; j<alphabet.size()-1; j++)
          if (Ia[i][j] and b[i][j]) { 
-            a[i][j] = qidx.locate_sample(Sa[i][j]);
+            a[i][j] = qidx->locate_sample(Sa[i][j]);
             if (locations.size()==0)
                locations = idx.locate_sample(sample);
             for (ulint iii=0; iii<a[i][j].size(); iii++) {
                // reporting one occurrence in the text
                MEMcount += 1;
 	       if (output.is_open())
-                  output_edge_MEM_gaf(locations[0], a[i][j][iii]+1, d, output, sp, efginfo, qinfo);
+                  output_edge_MEM_gaf(locations[0], a[i][j][iii]+1, d, q, output, sp, efginfo, qinfo);
             }
          }
    for (ulint i=0; i<alphabet.size()-1; i++) {
@@ -687,10 +730,10 @@ ulint reportAMEMs(T qidx, T idx, TS qsample, TS sample, ulint d, ofstream& outpu
 }
 
 template<class T, class TS>
-pair<ulint,ulint> explore_mems(T tidx, T qidx, T fidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo, bool f = false, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* sa = NULL)
+pair<ulint,ulint> explore_mems(T &tidx, T *qidx, T &fidx, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo, bool f = false, sdsl::int_vector<> d_bwt = sdsl::int_vector<>(), sdsl::rmq_succinct_sada<> rmq = sdsl::rmq_succinct_sada<>(), ulint* sa = NULL)
 {
     TS sample(tidx.get_initial_sample(true));
-    TS qsample(qidx.get_initial_sample(true));
+    TS qsample(qidx->get_initial_sample(true));
     pair <TS,TS> node;
     std::stack<pair <TS,TS>> S; // interval pairs
     std::stack<ulint> dS; // string depths
@@ -733,7 +776,7 @@ pair<ulint,ulint> explore_mems(T tidx, T qidx, T fidx, ofstream& output, startin
           continue; // not a valid range
        }
        if ((!is_right_maximal<T,TS>(tidx,sample) and !is_right_maximal<T,TS>(qidx,qsample)) and 
-           tidx.bwt_at(sample.rangeR.first,true)==qidx.bwt_at(qsample.rangeR.first,true) ) {
+           tidx.bwt_at(sample.rangeR.first,true)==qidx->bwt_at(qsample.rangeR.first,true) ) {
           continue; // implicit node reached
        }
        MEM = 1;
@@ -744,7 +787,7 @@ pair<ulint,ulint> explore_mems(T tidx, T qidx, T fidx, ofstream& output, startin
        // not branching with three last alphabet characters
        for (ulint j=0;j<alphabet.size()-3; j++) { 
           node.first = tidx.left_extension(alphabet[j],sample); 
-          node.second = qidx.left_extension(alphabet[j],qsample);   
+          node.second = qidx->left_extension(alphabet[j],qsample);
           S.push(node);       
           dS.push(d+1);
           if (f) {
@@ -759,16 +802,16 @@ pair<ulint,ulint> explore_mems(T tidx, T qidx, T fidx, ofstream& output, startin
 #ifdef EFG_MEMS_DEBUG
        cerr << "calling reportMEMs with depth equal to " << d;
        cerr << " on string ";
-       for (ulint n = 0, i = qidx.FL(qsample.range.first); n < d; n++, i = qidx.FL(i)) {
-          cerr << qidx.bwt_at(i);
+       for (ulint n = 0, i = qidx->FL(qsample.range.first); n < d; n++, i = qidx->FL(i)) {
+          cerr << qidx->bwt_at(i);
        }
        cerr << std::endl;
 #endif
           ulint mems;
 	  if (!asymmetric) {
-             mems = reportMEMs<T,TS>(tidx,qidx,sample,qsample,d,output,sp,efginfo,qinfo,d_bwt,rmq,sa);
+             mems = reportMEMs<T,TS>(tidx,qidx,sample,qsample,d,q,output,sp,efginfo,qinfo,d_bwt,rmq,sa);
           } else if (!f or fsample.is_invalid()) { // MEM string not found in filter index, so not a dublicate
-             mems = reportAMEMs<T,TS>(tidx,qidx,sample,qsample,d,output,sp,efginfo,qinfo);
+             mems = reportAMEMs<T,TS>(tidx,qidx,sample,qsample,d,q,output,sp,efginfo,qinfo);
           }
 
           MEMcount += mems;
@@ -782,7 +825,7 @@ pair<ulint,ulint> explore_mems(T tidx, T qidx, T fidx, ofstream& output, startin
 
 
 template<class T, class TS>
-pair<ulint,ulint> report_full_node_mems(string nodes, T qidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
+pair<ulint,ulint> report_full_node_mems(string nodes, T qidx, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
    ulint i = nodes.size()-3;
    ulint d;
@@ -806,7 +849,7 @@ pair<ulint,ulint> report_full_node_mems(string nodes, T qidx, ofstream& output, 
          for (ulint j=0; j < locations.size(); j++)
             //output << i+1 << "," << locations[j] << "," << d << endl; 
 	    if (output.is_open())
-               output_node_MEM_gaf(i+1, locations[j], d, output, sp, efginfo, qinfo);
+               output_node_MEM_gaf(i+1, locations[j], d, q, output, sp, efginfo, qinfo);
          if (locations.size()>0 and d>maxMEM)
             maxMEM = d;  
       }
@@ -821,7 +864,7 @@ pair<ulint,ulint> report_full_node_mems(string nodes, T qidx, ofstream& output, 
 
 
 template<class T, class TS>
-pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
+pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T *qidx, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
    ulint i = edges.size()-3;
    ulint d;
@@ -830,11 +873,11 @@ pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T 
    TS qsample,q2sample;
    std::vector<ulint> locations;
    while (i>1) {
-      qsample = qidx.get_initial_sample(true);
+      qsample = qidx->get_initial_sample(true);
       d = 0;
       report = false;
       while (edges[i-1]!=alphabet[alphabet.size()-1]) {
-         qsample = qidx.left_extension(edges[i],qsample);
+         qsample = qidx->left_extension(edges[i],qsample);
          if (qsample.is_invalid())
             break;
          if (d_edge[i-1]==1) // found a node boundary
@@ -844,28 +887,28 @@ pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T 
          if (report) {
             if (d>maxMEM)
               maxMEM = d;             
-            q2sample = qidx.left_extension(edges[i],qsample);
+            q2sample = qidx->left_extension(edges[i],qsample);
             if (q2sample.is_invalid()) { // no valid extensions, reporting the whole interval and stopping
-               locations = qidx.locate_sample(qsample);
+               locations = qidx->locate_sample(qsample);
                MEMcount += locations.size();
                for (ulint jj=0; jj < locations.size(); jj++)
                      //output << i+1 << "," << locations[jj] << "," << d << endl;            
 		     if (output.is_open())
-                        output_edge_MEM_gaf(i+1, locations[jj], d, output, sp, efginfo, qinfo);
+                        output_edge_MEM_gaf(i+1, locations[jj], d, q, output, sp, efginfo, qinfo);
                break;
             }  
             // Valid extension exist, reporting the rest
             for (ulint j=0; j<alphabet.size()-1; j++)
                if (alphabet[j]!=edges[i]) {
-                  q2sample = qidx.left_extension(alphabet[j],qsample);
+                  q2sample = qidx->left_extension(alphabet[j],qsample);
                   if (q2sample.is_invalid())
                      continue;                 
-                  locations = qidx.locate_sample(q2sample);
+                  locations = qidx->locate_sample(q2sample);
                   MEMcount += locations.size();
                   for (ulint jj=0; jj < locations.size(); jj++)
                      //output << i+1 << "," << locations[jj]+1 << "," << d << endl;
 		     if (output.is_open())
-                        output_edge_MEM_gaf(i+1, locations[jj]+1, d, output, sp, efginfo, qinfo);
+                        output_edge_MEM_gaf(i+1, locations[jj]+1, d, q, output, sp, efginfo, qinfo);
                }              
          } 
       }
@@ -879,7 +922,7 @@ pair<ulint,ulint> report_suffix_mems(string edges, sdsl::int_vector<> d_edge, T 
 }
 
 template<class T, class TS>
-pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T qidx, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
+pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T *qidx, int q, ofstream& output, starting_positions &sp, gfa_info &efginfo, query_info &qinfo)
 {
    ulint i = 2;
    ulint d;
@@ -888,11 +931,11 @@ pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T 
    TS qsample,q2sample;
    std::vector<ulint> locations;
    while (i<edges.size()) {
-      qsample = qidx.get_initial_sample(true);
+      qsample = qidx->get_initial_sample(true);
       d = 0;
       report = false;
       while (edges[i+1]!=alphabet[alphabet.size()-1]) {
-         qsample = qidx.right_extension(edges[i],qsample);
+         qsample = qidx->right_extension(edges[i],qsample);
          if (qsample.is_invalid())
             break;
          if (d_edge[i]==1) // found a node boundary
@@ -902,29 +945,29 @@ pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T 
          if (report) {
             if (d>maxMEM)
                maxMEM = d;
-            q2sample = qidx.right_extension(edges[i],qsample);
+            q2sample = qidx->right_extension(edges[i],qsample);
             if (q2sample.is_invalid()) { // no valid extensions, reporting the whole interval and stopping
-               locations = qidx.locate_sample(qsample);
+               locations = qidx->locate_sample(qsample);
                MEMcount += locations.size();
                for (ulint jj=0; jj < locations.size(); jj++) {
                      //output << i-d << "," << locations[jj] << "," << d << endl;            
 		     if (output.is_open())
-                        output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
+                        output_edge_MEM_gaf(i-d, locations[jj], d, q, output, sp, efginfo, qinfo);
                }
                break;
             }  
             // Valid extension exist, reporting the rest
             for (ulint j=0; j<alphabet.size()-1; j++)
                if (alphabet[j]!=edges[i]) {
-                  q2sample = qidx.right_extension(alphabet[j],qsample);
+                  q2sample = qidx->right_extension(alphabet[j],qsample);
                   if (q2sample.is_invalid())
                      continue;                 
-                  locations = qidx.locate_sample(q2sample);
+                  locations = qidx->locate_sample(q2sample);
                   MEMcount += locations.size();
                   for (ulint jj=0; jj < locations.size(); jj++) {
                      //output << i-d << "," << locations[jj] << "," << d << endl;
 		     if (output.is_open())
-                        output_edge_MEM_gaf(i-d, locations[jj], d, output, sp, efginfo, qinfo);
+                        output_edge_MEM_gaf(i-d, locations[jj], d, q, output, sp, efginfo, qinfo);
                   }
                }              
          } 
@@ -938,55 +981,47 @@ pair<ulint,ulint> report_prefix_mems(string edges, sdsl::int_vector<> d_edge, T 
 }
 
 template<class T>
-void initialize_query_info(T &qidx, query_info &qinfo)
+void initialize_query_info(T *qindex, query_info &qinfo)
 {
-	// find length of string
-	range_t fullrange = qidx.full_range();
-	ulint length = fullrange.second - fullrange.first; // terminator char included
+        // find length of string
+        range_t fullrange = qindex->full_range();
+        ulint length = fullrange.second - fullrange.first; // terminator char included
 
 #ifdef EFG_MEMS_DEBUG
-	// iterate over string
-	cerr << "length of query index is " << length << " and query is \"" << endl;
-	for (ulint i = qidx.FL(qidx.get_terminator_position()); i != qidx.get_terminator_position(); i = qidx.FL(i)) {
-		cerr << qidx.bwt_at(i);
-	}
-	cerr << "\"" << endl;
+        // iterate over string
+        cerr << "terminator position is " << qindex->get_terminator_position() << endl;
+        cerr << "BWT of query index is " << qindex->get_bwt(false) << endl;
+        cerr << "length of query index is " << length << " and query is \"";
+        {
+                string s;
+                ulint i = qindex->get_terminator_position();
+                do {
+                        s += qindex->bwt_at(i);
+                        i = qindex->FL(i);
+                } while (i != qindex->get_terminator_position());
+                cerr << s << "\"" << endl;
+        }
+        cerr << "query lengths are ";
+        for (auto l : qinfo.ordered_query_lengths) {
+                cerr << l << " ";
+        }
+        cerr << endl;
 #endif
 
-	qinfo.concat.resize(length - 1);
-	// TODO: assert
-	qinfo.concat[0] = 0;
-	ulint qlength = 0;
-	for (ulint j = 0, i = qidx.FL(qidx.get_terminator_position()); qidx.FL(qidx.FL(i)) != qidx.get_terminator_position(); i = qidx.FL(i), j += 1) {
-		char c = qidx.bwt_at(i);
-		if (c == alphabet[alphabet.size()-2]) {
-			qinfo.concat[j+1] = 1;
-			if (qlength != 0) {
-				qinfo.ordered_query_lengths.push_back(qlength);
-			}
-			qlength = 0;
-		} else {
-			qinfo.concat[j+1] = 0;
-			qlength += 1;
-		}
-	}
-	qinfo.ordered_query_lengths.push_back(qlength);
+        if (batch_queries) {
+                qinfo.concat.resize(length - 1);
+                for (ulint i = 0; i < length - 1; i++)
+                        qinfo.concat[i] = 0;
+                qinfo.concat[0] = 0;
+                qinfo.concat[1] = 1;
+                for (ulint i = 0, j = 1; i < qinfo.ordered_query_lengths.size(); i++) {
+                        j += qinfo.ordered_query_lengths[i] + 1;
+                        qinfo.concat[j] = 1;
+                }
 
-#ifdef EFG_MEMS_DEBUG
-	cerr << "query lengths are ";
-	for (auto l : qinfo.ordered_query_lengths) {
-		cerr << l << " ";
-	}
-	cerr << endl;
-#endif
-
-	qinfo.concat_rs = sdsl::rank_support_v5<>(&qinfo.concat);
-	qinfo.concat_ss = sdsl::select_support_mcl<>(&qinfo.concat);
-
-	// TODO: change
-	for (ulint i = 0; i < qinfo.concat_rs(length - 1); i++) {
-		qinfo.ordered_query_ids.push_back("query" + std::to_string(i+1));
-	}
+                qinfo.concat_rs = sdsl::rank_support_v5<>(&qinfo.concat);
+                qinfo.concat_ss = sdsl::select_support_mcl<>(&qinfo.concat);
+        }
 }
 
 template<class T, class TS>
@@ -1074,20 +1109,16 @@ void prepare_efg(string const &filename_efg, string &nodes_without_gt, string &e
     */
 
 #ifdef EFG_MEMS_DEBUG
-    cerr << "Node index is " << endl;
+    cerr << "Node index and node starting positions are " << endl;
     cerr << nodes_without_gt << endl;
-
-    cerr << "Node starting positions in the index are " << endl;
     for (ulint i=0; i < sp.nodes.size(); i++)
-	    cerr << sp.nodes[i];
+	    cerr << ((sp.nodes[i]) ? '*' : ' ');
     cerr << endl;
 
-    cerr << "Edge index is " << endl;
+    cerr << "Edge index and edge starting positions are" << endl;
     cerr << edges_without_gt << endl;
-
-    cerr << "Edge starting positions in the index are " << endl;
     for (ulint i=0; i < sp.edges.size(); i++)
-	    cerr << sp.edges[i];
+	    cerr << ((sp.edges[i]) ? '*' : ' ');
     cerr << endl;
 #endif
 
@@ -1139,29 +1170,63 @@ void prepare_efg(string const &filename_efg, string &nodes_without_gt, string &e
 }
 
 template<class T, class TS>
-void prepare_query(string filename_qidx, T &qidx, std::stack<T> &qindexes, query_info &qinfo)
+void prepare_query(string filename_qidx, std::vector<T*> &qindexes, query_info &qinfo)
 {
-    if (use_brindex)
-       qidx.load_from_file(filename_qidx);      
-    else {
-       // With bdbwt, creating indexes on the fly
+    // TODO: enable loading from file
+    if (batch_queries) {
+       ifstream qidx_in(filename_qidx);
+       string qindex = "#", line;
+       // TODO: proper FASTA parsing
+       while (getline(qidx_in, line)) {
+          if (line.size()>=1 and line[0]!='>') {
+             qindex += line;
+             qindex += "#";
+             qinfo.ordered_query_lengths.push_back(line.length());
+          } else if (line.size()>1 and line[0]=='>') {
+             qinfo.ordered_query_ids.push_back(line.substr(1));
+          }
+       }
+#ifdef EFG_MEMS_DEBUG
+       cerr << "Query index is" << std::endl;
+       cerr << qindex << std::endl;
+#endif
+       //qindex += "\n";
+       qindexes.push_back(new T(qindex));
+    } else {
        ifstream qidx_in(filename_qidx);
        string queries;
        getline(qidx_in,queries); // by default assuming input is one line
        //cout << queries << endl;
        if (queries[0]=='>') {// fasta
+          qinfo.ordered_query_ids.push_back(queries.substr(1));
           fasta = true;
           while (getline(qidx_in,queries)) {
              //cout << queries << endl;
-             if (queries.size()>1 and queries[0]!='>')
-                qindexes.push(T("#"+queries+"#"));
+             if (queries.size()>=1 and queries[0]!='>') {
+                qindexes.push_back(new T("#"+queries+"#"));
+                qinfo.ordered_query_lengths.push_back(queries.length());
+             } else if (queries.size()>=1 and queries[0]=='>') {
+                qinfo.ordered_query_ids.push_back(queries.substr(1));
+             }
           }
        }   
        else
-          qidx = T(queries);
+          qindexes.push_back(new T(queries)); // TODO: find what input is this
        qidx_in.close(); 
+#ifdef EFG_MEMS_DEBUG
+       cerr << "Query indexes are" << std::endl;
+       for (int q = 0; q < qindexes.size(); q++) {
+               string s;
+               ulint i = qindexes[q]->get_terminator_position();
+               do {
+                       s += qindexes[q]->bwt_at(i);
+                       i = qindexes[q]->FL(i);
+               } while (i != qindexes[q]->get_terminator_position());
+               cerr << s << endl;
+       }
+#endif
     }
-    initialize_query_info(qidx, qinfo);
+    initialize_query_info(qindexes[0], qinfo);
 }
 
 template<class T, class TS>
@@ -1195,9 +1260,8 @@ void find_mems(string filename_qidx, string filename_efg)
     prepare_efg<T,TS>(filename_efg, nodes_without_gt, edges_without_gt, nidx, eidx, d_edge, d_edge_bwt, rmq_edge, sa_edge, sp, efginfo);
 
     query_info qinfo;
-    T qidx;
-    std::stack<T> qindexes; // queries in fasta
-    prepare_query<T,TS>(filename_qidx, qidx, qindexes, qinfo);
+    std::vector<T*> qindexes; // queries in fasta
+    prepare_query<T,TS>(filename_qidx, qindexes, qinfo);
 
     ofstream output;
     if (output_file.size()!=0) {     
@@ -1212,23 +1276,22 @@ void find_mems(string filename_qidx, string filename_efg)
 
     ulint maxMEM;
     
-    if (!fasta) // queries as concatenation
-       qindexes.push(qidx);
+    //if (!fasta) // queries as concatenation
+    //   qindexes.push(qidx);
     
-    while (!qindexes.empty()) {
-       qidx = qindexes.top();
-       qindexes.pop();
+    for (int q = 0; q < qindexes.size(); q++) {
+       T *qidx = qindexes[q];
 
-       pair<ulint,ulint> result = explore_mems<T,TS>(nidx,qidx,nidx,output,sp,efginfo,qinfo,false);
+       pair<ulint,ulint> result = explore_mems<T,TS>(nidx,qidx,nidx,q,output,sp,efginfo,qinfo,false);
        maxMEM = result.first;
        ulint nodeMEMs = result.second;
        cerr << "Found " << nodeMEMs << " node " << kappa << "-MEM of length at most " << maxMEM << endl;
 
        ulint edgeMEMs;
        if (!asymmetric) {
-          result = explore_mems<T,TS>(eidx,qidx,nidx,output,sp,efginfo,qinfo,false,d_edge_bwt,rmq_edge,sa_edge);
+          result = explore_mems<T,TS>(eidx,qidx,nidx,q,output,sp,efginfo,qinfo,false,d_edge_bwt,rmq_edge,sa_edge);
        } else { // using node index as filter
-          result = explore_mems<T,TS>(eidx,qidx,nidx,output,sp,efginfo,qinfo,true,d_edge_bwt,rmq_edge,sa_edge);
+          result = explore_mems<T,TS>(eidx,qidx,nidx,q,output,sp,efginfo,qinfo,true,d_edge_bwt,rmq_edge,sa_edge);
        }
        maxMEM = result.first;
        edgeMEMs = result.second;
@@ -1244,15 +1307,17 @@ void find_mems(string filename_qidx, string filename_efg)
        //cerr << "Found " << edgeMEMs << " full node MEMs of length at most " << maxMEM << endl;
     
 
-       result = report_suffix_mems<T,TS>(edges_without_gt,d_edge,qidx,output,sp,efginfo,qinfo);
+       result = report_suffix_mems<T,TS>(edges_without_gt,d_edge,qidx,q,output,sp,efginfo,qinfo);
        maxMEM = result.first;
        ulint edgesufMEMs = result.second;
        cerr << "Found " << edgesufMEMs << " edge suffix MEMs of length at most " << maxMEM << endl;
     
-       result = report_prefix_mems<T,TS>(edges_without_gt,d_edge,qidx,output,sp,efginfo,qinfo);
+       result = report_prefix_mems<T,TS>(edges_without_gt,d_edge,qidx,q,output,sp,efginfo,qinfo);
        maxMEM = result.first;
        ulint edgepreMEMs = result.second;
        cerr << "Found " << edgepreMEMs << " edge prefix MEMs of length at most " << maxMEM << endl;
+
+       delete qidx;
     }
     output.close();
     d_edge_bwt.empty();

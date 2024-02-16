@@ -180,6 +180,25 @@ public:
           res[i-sample.range.first] = saidx[i];
        return res; 
     }
+
+    /*
+     * get string representation of BWT
+     */
+    std::string get_bwt(bool reversed = false)
+    {
+        if (!reversed)
+        {
+            std::string res(bdbwt.size(), '0');
+            for (size_t i = 0; i < bdbwt.size(); ++i)
+                res[i] = bdbwt.forward_bwt_at(i);
+            return res;
+        } else {
+            std::string res(bdbwt.size(), '0');
+            for (size_t i = 0; i < bdbwt.size(); ++i)
+                res[i] = bdbwt.backward_bwt_at(i);
+            return res;
+        }
+    }
     
 
 

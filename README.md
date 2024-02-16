@@ -49,6 +49,4 @@ cd inputs
 ```
 
 ## TODO
- - parse input queries with the correct FASTA header info
- - finalize linear MEMS file format
- - output both formats (GAF/MEMS) in one execution
+ - fix bdbwt crashes/output
