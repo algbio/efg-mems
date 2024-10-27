@@ -2,8 +2,8 @@
   * with the bdbwt as needed for MEM finding
   */
 
-#include "../br-index/src/definitions.hpp"
-#include "../bdbwt/include/BD_BWT_index.hh" 
+#include "definitions.hpp"
+#include "BD_BWT_index.hh"
 
 namespace bri {
 
